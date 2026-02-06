@@ -11,6 +11,80 @@ Un système simple où chaque client (Client A, Client B) a ses propres document
 4. **Interface web** : Frontend Streamlit simple pour choisir le client et poser des questions
 
 
+**RAG = Retrieval Augmented Generation** (
+
+### Pourquoi RAG dans ce projet ?
+
+**Réponses précises** - Basées sur les vrais documents, pas des hallucinations IA
+**Sécurisé** - Pas d'accès à des informations externes
+**Multi-tenant** - Isolation garantie par tenant
+**Traçabilité** - On sait d'où vient chaque réponse (sources)
+
+### Comment fonctionne le RAG ici
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ 1. INDEXATION (au démarrage)                               │
+│    - Lis les documents de chaque tenant                    │
+│    - Découpe en chunks de 500 caractères                   │
+│    - Convertit en vecteurs (embeddings) avec              │
+│      SentenceTransformer (all-MiniLM-L6-v2)               │
+│    - Stocke dans ChromaDB                                  │
+└────────────────────────────────────────────────────────────┘
+                            ↓
+┌────────────────────────────────────────────────────────────┐
+│ 2. RETRIEVAL (quand l'utilisateur pose une question)      │
+│    - Encode la question en vecteur                         │
+│    - Cherche les 3 documents les plus similaires           │
+│      (similarité cosinus) dans ChromaDB                    │
+│    - Retourne les documents pertinents                     │
+└────────────────────────────────────────────────────────────┘
+                            ↓
+┌────────────────────────────────────────────────────────────┐
+│ 3. AUGMENTATION (préparation du prompt)                    │
+│    - Crée un prompt avec :                                 │
+│      * Les documents trouvés comme contexte                │
+│      * La question de l'utilisateur                        │
+│      * Instructions au modèle                              │
+└────────────────────────────────────────────────────────────┘
+                            ↓
+┌────────────────────────────────────────────────────────────┐
+│ 4. GENERATION (avec Ollama)                                │
+│    - Envoie le prompt à Ollama (LLM local)                │
+│    - Le modèle génère une réponse basée sur le contexte   │
+│    - Retourne réponse + sources                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+### Exemple concret
+
+```
+Question: "Quelle est la procédure de résiliation ?"
+Tenant: Client A
+
+↓↓↓
+
+RETRIEVAL: 
+- Trouve dans docA1_procedure_resiliation.txt:
+  "La résiliation doit être demandée par écrit..."
+
+AUGMENTATION:
+- Crée ce prompt:
+  "Basé sur le document fourni : [doc]
+   Réponds à la question: Quelle est la procédure de résiliation?"
+
+GENERATION:
+- Ollama génère:
+  "La procédure de résiliation selon le document fourni est..."
+
+RÉSULTAT:
+{
+  "answer": "La procédure de résiliation...",
+  "sources": ["docA1_procedure_resiliation.txt"]
+}
+```
+
+
 ##  Installation
 
 
@@ -122,23 +196,30 @@ curl -X POST "http://127.0.0.1:8000/ask?question=sinistre" \
 saas-multitenant-test/          
 │
 ├── backend/
-│   └── main.py                  
-│       └── POST /ask            
-│   data/
-│    ├── tenantA/                 
-│    │   ├── docA1_procedure_resiliation.txt
-│    │   └── docA2_produit_rc_pro_a.txt
-│    │
-│    └── tenantB/                 
-│       ├── docB1_procedure_sinistre.txt
-│       └── docB2_produit_rc_pro_b.txt
+│   ├── main.py                  
+│   ├── rag_model.py             
+│   └── data/
+│        ├── tenantA/                 
+│        │   ├── docA1_procedure_resiliation.txt
+│        │   └── docA2_produit_rc_pro_a.txt
+│        │
+│        └── tenantB/                 
+│           ├── docB1_procedure_sinistre.txt
+│           └── docB2_produit_rc_pro_b.txt
 ├── frontend/
 │   └── app.py                   
-│
-│
 ├── README.md                    
 ├── requirements.txt  
+└── .env                         
 ```
+
+### Fichiers clés du RAG
+
+| Fichier | Rôle |
+|---------|------|
+| `backend/rag_model.py` | Classe RAGModel - gère indexation, retrieval, génération |
+| `backend/main.py` | API endpoint `/ask` qui utilise RAGModel |
+| `backend/data/` | Documents source par tenant (indexés au démarrage) |
 
 ---
 
@@ -157,9 +238,19 @@ Le backend valide la clé API et charge **uniquement les documents du tenant**.
 
 ##  Stack Technologique
 
+### Core
 - **Backend** : FastAPI (framework API Python ultra-rapide)
 - **Frontend** : Streamlit (interface web en Python, super simple)
 - **Auth** : API Keys dans Headers
 - **DB** : Fichiers texte (pas de DB, c'est volontaire pour la démo!)
+
+### RAG Components
+- **Embedding Model** : `sentence-transformers/all-MiniLM-L6-v2` (convertit texte → vecteurs 384D)
+- **Vector DB** : ChromaDB (stockage et recherche vectorielle)
+- **LLM** : Ollama (modèles locaux, pas d'API externe)
+- **Processing** : 
+  - Text chunking (découpe intelligente des documents)
+  - Cosine similarity (recherche des documents pertinents)
+  - Prompt engineering (augmentation du contexte)
 
 ---

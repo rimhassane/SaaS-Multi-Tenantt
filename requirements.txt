@@ -2,3 +2,7 @@
 uvicorn
 streamlit
 requests
+chromadb
+sentence-transformers
+openai
+python-dotenv
